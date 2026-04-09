@@ -186,6 +186,47 @@ BASE_HTML = """
     <div class="main-container">{{ content | safe }}</div>
     
     <script>
+
+    function initControlCalendar(selector, isSingle = false, withTime = false) {
+        let options = {
+            locale: {
+                format: withTime ? 'DD.MM.YY HH:mm' : 'DD.MM.YY',
+                applyLabel: 'Применить',
+                cancelLabel: 'Отмена',
+                customRangeLabel: 'Другой',
+                daysOfWeek: ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'],
+                monthNames: ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'],
+                firstDay: 1
+            }
+        };
+
+        if (isSingle) {
+            // Настройки для выбора одной даты (с выбором времени или без)
+            options.singleDatePicker = true;
+            options.showDropdowns = true;
+            if (withTime) {
+                options.timePicker = true;
+                options.timePicker24Hour = true;
+            }
+        } else {
+            // Настройки для выбора диапазона (как в панели управления)
+            options.opens = 'right';
+            options.ranges = {
+               'Сегодня': [moment(), moment()],
+               'Вчера': [moment().subtract(1, 'days'), moment().subtract(1, 'days')],
+               'Последние 7 дней': [moment().subtract(6, 'days'), moment()],
+               'Последние 30 дней': [moment().subtract(29, 'days'), moment()],
+               'Этот месяц': [moment().startOf('month'), moment().endOf('month')],
+               'Прошлый месяц': [moment().subtract(1, 'month').startOf('month'), moment().subtract(1, 'month').endOf('month')]
+            };
+            // Ставим по умолчанию текущий месяц вместо жесткого марта 2026
+            options.startDate = moment().startOf('month');
+            options.endDate = moment().endOf('month');
+        }
+
+        $(selector).daterangepicker(options);
+        return $(selector).data('daterangepicker');
+    }
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
             document.getElementById('overlay').classList.toggle('show');
@@ -320,23 +361,9 @@ EXPENSES_HTML = """
     let currentExpPay = 'Наличные';
 
     $(function() {
-        $('#expDateRange').daterangepicker({
-            opens: 'right', locale: { format: 'DD.MM.YY', applyLabel: 'Применить', cancelLabel: 'Отмена', customRangeLabel: 'Другой', daysOfWeek: ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'], monthNames: ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'], firstDay: 1 },
-            ranges: { 
-               'Сегодня': [moment(), moment()], 
-               'Вчера': [moment().subtract(1, 'days'), moment().subtract(1, 'days')], 
-               'Последние 7 дней': [moment().subtract(6, 'days'), moment()], 
-               'Последние 30 дней': [moment().subtract(29, 'days'), moment()], 
-               'Этот месяц': [moment().startOf('month'), moment().endOf('month')], 
-               'Прошлый месяц': [moment().subtract(1, 'month').startOf('month'), moment().subtract(1, 'month').endOf('month')] 
-            },
-            startDate: moment('2026-03-01'), endDate: moment('2026-03-31')
-        });
-
-        $('#newExpDate').daterangepicker({
-            singleDatePicker: true, showDropdowns: true,
-            locale: { format: 'DD.MM.YY', daysOfWeek: ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'], monthNames: ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'], firstDay: 1 }
-        });
+        // Инициализация календарей через общую функцию
+        initControlCalendar('#expDateRange');
+        initControlCalendar('#newExpDate', true); // isSingle = true
 
         {% if selected_dates %}
             $('#expDateRange').val("{{ selected_dates }}");
@@ -646,24 +673,8 @@ DASHBOARD_HTML = """
 
 <script>
     $(function() {
-        $('#reportDateRange').daterangepicker({
-            opens: 'right',
-            locale: {
-                format: 'DD.MM.YY', applyLabel: 'Применить', cancelLabel: 'Отмена', customRangeLabel: 'Другой',
-                daysOfWeek: ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'], monthNames: ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'],
-                firstDay: 1
-            },
-            ranges: {
-               'Сегодня': [moment(), moment()],
-               'Вчера': [moment().subtract(1, 'days'), moment().subtract(1, 'days')],
-               'Последние 7 дней': [moment().subtract(6, 'days'), moment()],
-               'Последние 30 дней': [moment().subtract(29, 'days'), moment()],
-               'Этот месяц': [moment().startOf('month'), moment().endOf('month')],
-               'Прошлый месяц': [moment().subtract(1, 'month').startOf('month'), moment().subtract(1, 'month').endOf('month')]
-            },
-            startDate: moment('2026-03-01'), 
-            endDate: moment('2026-03-31')
-        });
+        // Вызываем общую функцию инициализации
+        initControlCalendar('#reportDateRange');
         generateReport();
     });
 
@@ -828,25 +839,8 @@ ORDERS_FULL_TABLE_HTML = """
 
 <script>
     $(function() {
-        $('#ordersDateRange').daterangepicker({
-            opens: 'right',
-            locale: {
-                format: 'DD.MM.YY', applyLabel: 'Применить', cancelLabel: 'Отмена', customRangeLabel: 'Другой',
-                daysOfWeek: ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'],
-                monthNames: ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'],
-                firstDay: 1
-            },
-            ranges: {
-               'Сегодня': [moment(), moment()],
-               'Вчера': [moment().subtract(1, 'days'), moment().subtract(1, 'days')],
-               'Последние 7 дней': [moment().subtract(6, 'days'), moment()],
-               'Последние 30 дней': [moment().subtract(29, 'days'), moment()],
-               'Этот месяц': [moment().startOf('month'), moment().endOf('month')],
-               'Прошлый месяц': [moment().subtract(1, 'month').startOf('month'), moment().subtract(1, 'month').endOf('month')]
-            },
-            startDate: moment('2026-03-01'), 
-            endDate: moment('2026-03-31')
-        });
+        // Инициализация календаря
+        initControlCalendar('#ordersDateRange');
 
         {% if selected_dates %}
             $('#ordersDateRange').val("{{ selected_dates }}");
@@ -926,6 +920,8 @@ CREATE_ORDER_HTML = """
 <style>
     .order-form { flex: 1; display: flex; flex-direction: column; overflow-y: auto; padding: 15px; background: #fff; }
     .top-inputs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 10px; }
+    .date-wrapper { position: relative; display: inline-block; width: 100%; }
+    .date-wrapper::after { content: '📅'; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; font-size: 14px; }
     .top-inputs input { padding: 10px; border: 1px solid #ddd; background: #fafafa; width: 100%; box-sizing: border-box; outline: none; border-radius: 4px;}
     .v-tabs { display: flex; background: #eee; margin-bottom: 10px; border-radius: 4px; overflow: hidden;}
     .v-tab { flex: 1; text-align: center; padding: 12px; cursor: pointer; font-weight: bold; color: #555; border-right: 1px solid #ddd; transition: 0.2s;}
@@ -995,7 +991,9 @@ CREATE_ORDER_HTML = """
 
 <div class="order-form">
     <div class="top-inputs">
-        <input type="text" id="dateTimeInput" placeholder="Дата/Время" value="{{ order.date if order else '' }}">
+        <div class="date-wrapper">
+            <input type="text" id="dateTimeInput" placeholder="Дата/Время" value="{{ order.date if order else '' }}">
+        </div>
         <input type="text" id="numInput" placeholder="Номер" value="{{ order.num if order else '' }}">
         <input type="text" id="markInput" placeholder="Марка" value="{{ order.mark if order else '' }}">
         <input type="text" id="nameInput" placeholder="Имя" value="{{ order.name if order else '' }}">
@@ -1212,6 +1210,9 @@ CREATE_ORDER_HTML = """
             renderServices();
         }
         calcTotal();
+
+        // Инициализация календаря для окна создания заказа (включая выбор времени)
+        initControlCalendar('#dateTimeInput', true, true);
     });
 
     function renderServices() {
@@ -1641,7 +1642,6 @@ CREATE_ORDER_HTML = """
     }
 </script>
 """
-
 # ==========================================
 # РОУТЫ (МАРШРУТИЗАЦИЯ)
 # ==========================================
