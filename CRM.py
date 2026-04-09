@@ -101,334 +101,6 @@ def get_kassa_totals():
     }
 
 # ==========================================
-# РОУТЫ (МАРШРУТИЗАЦИЯ)
-# ==========================================
-
-@app.route('/')
-def index():
-    if 'user' in session: return redirect(url_for('dashboard'))
-    return redirect(url_for('login'))
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        session['user'] = request.form.get('phone', '+7 (932)-322-22-12')
-        return redirect(url_for('dashboard'))
-    return render_template_string(LOGIN_HTML)
-
-@app.route('/logout')
-def logout():
-    session.clear()
-    return redirect(url_for('login'))
-
-@app.route('/dashboard')
-def dashboard():
-    if 'user' not in session: return redirect(url_for('login'))
-    return render_template_string(BASE_HTML, content=render_template_string(DASHBOARD_HTML, workers=WORKERS_DB), current_tab='dashboard', show_topbar=False, kassa=get_kassa_totals())
-
-@app.route('/api/get_report', methods=['POST'])
-def get_report_api():
-    if 'user' not in session: return jsonify({'error': 'Unauthorized'}), 401
-    req = request.json
-    start_date_str = req.get('start', '').strip()
-    end_date_str = req.get('end', '').strip()
-    worker_filter = req.get('worker') 
-
-    try:
-        start_date = datetime.strptime(start_date_str, '%d.%m.%y')
-        end_date = datetime.strptime(end_date_str + ' 23:59:59', '%d.%m.%y %H:%M:%S')
-    except Exception as e:
-        start_date = datetime.min
-        end_date = datetime.max
-
-    stats = {
-        'cash': 0, 'cash_count': 0, 'invoice': 0, 'invoice_count': 0,
-        'card': 0, 'card_count': 0, 'transfer': 0, 'transfer_count': 0,
-        'd30': 0, 'd30_count': 0, 'd20': 0, 'd20_count': 0, 'd10': 0, 'd10_count': 0,
-        'total_orders': 0, 'total_orders_count': 0, 'total_disc': 0, 'total_disc_count': 0
-    }
-
-    for o in ORDERS_DB['closed']:
-        try:
-            order_date = datetime.strptime(o['date'], '%d.%m.%y %H:%M')
-            if not (start_date <= order_date <= end_date): continue
-        except: continue 
-            
-        if worker_filter and worker_filter != "(Все)" and worker_filter not in o.get('master', ''): continue
-                
-        amt = int(str(o.get('amount', '0')).replace(' ₽', '').replace(' ', ''))
-        pay_method = o.get('payment_method', 'Наличные')
-        disc = int(o.get('discount', 0))
-
-        stats['total_orders'] += amt
-        stats['total_orders_count'] += 1
-
-        if pay_method == 'Наличные': stats['cash'] += amt; stats['cash_count'] += 1
-        elif pay_method == 'Карта': stats['card'] += amt; stats['card_count'] += 1
-        elif pay_method == 'Счёт': stats['invoice'] += amt; stats['invoice_count'] += 1
-        elif pay_method == 'Перевод': stats['transfer'] += amt; stats['transfer_count'] += 1
-
-        if disc > 0:
-            disc_rubles = int((amt / (1 - disc/100)) * (disc/100))
-            stats['total_disc'] += disc_rubles
-            stats['total_disc_count'] += 1
-            if disc == 10: stats['d10'] += disc_rubles; stats['d10_count'] += 1
-            elif disc == 20: stats['d20'] += disc_rubles; stats['d20_count'] += 1
-            elif disc == 30: stats['d30'] += disc_rubles; stats['d30_count'] += 1
-
-    avg = stats['total_orders'] / stats['total_orders_count'] if stats['total_orders_count'] > 0 else 0
-        
-    return jsonify({
-        'cash': f"{stats['cash']:,} ₽".replace(',', ' '), 'cash_count': stats['cash_count'],
-        'invoice': f"{stats['invoice']:,} ₽".replace(',', ' '), 'invoice_count': stats['invoice_count'],
-        'card': f"{stats['card']:,} ₽".replace(',', ' '), 'card_count': stats['card_count'],
-        'transfer': f"{stats['transfer']:,} ₽".replace(',', ' '), 'transfer_count': stats['transfer_count'],
-        'total_orders': f"{stats['total_orders']:,} ₽".replace(',', ' '), 'total_orders_count': stats['total_orders_count'],
-        'salary': '0 ₽', 'other_exp': '0 ₽', 'total_exp': '0 ₽', 
-        'avg_check': f"{avg:,.2f} ₽".replace(',', ' '), 'obj_load': '0,00 %', 'worker_load': '0,00 %',
-        'd30': f"{stats['d30']:,} ₽".replace(',', ' '), 'd30_count': stats['d30_count'],
-        'd20': f"{stats['d20']:,} ₽".replace(',', ' '), 'd20_count': stats['d20_count'],
-        'd10': f"{stats['d10']:,} ₽".replace(',', ' '), 'd10_count': stats['d10_count'],
-        'total_disc': f"{stats['total_disc']:,} ₽".replace(',', ' '), 'total_disc_count': stats['total_disc_count']
-    })
-
-def format_orders_for_table(orders_list):
-    result = []
-    for idx, o in enumerate(orders_list):
-        base_grp = 'truck' if o.get('type_id') == 'truck' else 'car'
-        
-        srv_list = []
-        for s_id, qty in o.get('services', {}).items():
-            name = SRV_NAMES[base_grp].get(s_id, s_id)
-            if base_grp == 'car' and o.get('radius'): name += f" {o['radius']}"
-            if qty > 1: name += f" x {qty}"
-            srv_list.append(f"▶ {name}")
-
-        stk_list = []
-        for s_id, qty in o.get('stock', {}).items():
-            name = STOCK_MAP.get(s_id, s_id)
-            stk_list.append(name)
-
-        date_parts = o.get('date', '').split(' ')
-        date_html = f"{date_parts[0]}<br><span style='color:#888; font-size:12px;'>{date_parts[1] if len(date_parts)>1 else ''}</span>"
-        status_html = '<span class="status-closed">Закрыт</span>' if o.get('status') == 'closed' else '<span class="status-work">В работе</span>'
-
-        result.append({
-            'index': o.get('id') if len(str(o.get('id'))) < 5 else idx + 1,
-            'id': o.get('id'),
-            'date_html': date_html,
-            'raw_date': o.get('date', ''),
-            'mark': o.get('mark', ''),
-            'num': o.get('num', 'БН') or 'БН',
-            'services_html': '<br>'.join(srv_list) or '—',
-            'stock_html': '<br>'.join(stk_list),
-            'master': o.get('master', ''),
-            'payment': o.get('payment_method', ''),
-            'discount': f"{o.get('discount')}%" if o.get('discount', 0) else '',
-            'amount': o.get('amount', '0'),
-            'status_html': status_html,
-            'raw_status': o.get('status', 'in_work')
-        })
-    return result
-
-@app.route('/orders_list')
-def orders_list():
-    if 'user' not in session: return redirect(url_for('login'))
-    
-    dates_param = request.args.get('dates')
-    all_raw_data = ORDERS_DB['in_work'] + ORDERS_DB['closed']
-    
-    if dates_param:
-        try:
-            start_str, end_str = dates_param.split(' - ')
-            start_date = datetime.strptime(start_str.strip(), '%d.%m.%y')
-            end_date = datetime.strptime(end_str.strip() + ' 23:59:59', '%d.%m.%y %H:%M:%S')
-            
-            filtered_data = []
-            for o in all_raw_data:
-                try:
-                    o_date = datetime.strptime(o['date'], '%d.%m.%y %H:%M')
-                    if start_date <= o_date <= end_date:
-                        filtered_data.append(o)
-                except: pass
-            all_raw_data = filtered_data
-        except: pass
-            
-    formatted_data = format_orders_for_table(all_raw_data)
-    return render_template_string(BASE_HTML, content=render_template_string(ORDERS_FULL_TABLE_HTML, orders=formatted_data, workers=WORKERS_DB, selected_dates=dates_param), current_tab='orders_list', show_topbar=False, kassa=get_kassa_totals())
-
-@app.route('/checkout')
-def checkout():
-    if 'user' not in session: return redirect(url_for('login'))
-    status = request.args.get('status', 'in_work')
-    
-    today = datetime.now().date()
-    yesterday = today - timedelta(days=1)
-    
-    recent_orders = []
-    for o in ORDERS_DB.get(status, []):
-        try:
-            o_date = datetime.strptime(o['date'], '%d.%m.%y %H:%M').date()
-            if o_date in [today, yesterday]: recent_orders.append(o)
-        except: pass
-
-    formatted_data = format_orders_for_table(recent_orders)
-    
-    in_work_count = len([o for o in ORDERS_DB['in_work'] if datetime.strptime(o['date'], '%d.%m.%y %H:%M').date() in [today, yesterday]])
-    closed_count = len([o for o in ORDERS_DB['closed'] if datetime.strptime(o['date'], '%d.%m.%y %H:%M').date() in [today, yesterday]])
-
-    return render_template_string(BASE_HTML, content=render_template_string(CHECKOUT_LIST_HTML, orders=formatted_data, status=status), current_tab='checkout', current_status=status, in_work_count=in_work_count, closed_count=closed_count, show_topbar=True, kassa=get_kassa_totals())
-
-@app.route('/clients')
-def clients():
-    if 'user' not in session: return redirect(url_for('login'))
-    
-    clients_dict = {}
-    for status in ['closed', 'in_work']:
-        for o in ORDERS_DB[status]:
-            phone = o.get('phone', '').strip()
-            if not phone: phone = 'Без телефона'
-            
-            if phone not in clients_dict:
-                clients_dict[phone] = {
-                    'phone': phone,
-                    'name': o.get('name', ''),
-                    'mark': o.get('mark', ''),
-                    'num': o.get('num', ''),
-                    'total_amount': 0,
-                    'orders': []
-                }
-            
-            if not clients_dict[phone]['name'] and o.get('name'): clients_dict[phone]['name'] = o['name']
-            if not clients_dict[phone]['mark'] and o.get('mark'): clients_dict[phone]['mark'] = o['mark']
-            if not clients_dict[phone]['num'] and o.get('num') and o.get('num') != 'БН': clients_dict[phone]['num'] = o['num']
-
-            amt = int(str(o.get('amount', '0')).replace(' ₽', '').replace(' ', ''))
-            clients_dict[phone]['total_amount'] += amt
-            
-            base_grp = 'truck' if o.get('type_id') == 'truck' else 'car'
-            srv_list = []
-            for s_id, qty in o.get('services', {}).items():
-                name = SRV_NAMES[base_grp].get(s_id, s_id)
-                if base_grp == 'car' and o.get('radius'): name += f" {o['radius']}"
-                if qty > 1: name += f" x {qty}"
-                srv_list.append(name)
-                
-            clients_dict[phone]['orders'].append({
-                'date': o.get('date', ''),
-                'services': '<br>'.join(srv_list) or '—',
-                'master': o.get('master', ''),
-                'payment': o.get('payment_method', ''),
-                'amount': f"{amt:,} ₽".replace(',', ' ')
-            })
-            
-    client_list = list(clients_dict.values())
-    client_list.sort(key=lambda x: x['total_amount'], reverse=True)
-    
-    return render_template_string(BASE_HTML, content=render_template_string(CLIENTS_HTML, clients=client_list), current_tab='clients', show_topbar=False, kassa=get_kassa_totals())
-
-# НОВАЯ ВКЛАДКА РАСХОДЫ
-@app.route('/expenses')
-def expenses():
-    if 'user' not in session: return redirect(url_for('login'))
-    
-    dates_param = request.args.get('dates')
-    filtered_expenses = EXPENSES_DB.copy()
-    
-    if dates_param:
-        try:
-            start_str, end_str = dates_param.split(' - ')
-            start_date = datetime.strptime(start_str.strip(), '%d.%m.%y')
-            end_date = datetime.strptime(end_str.strip() + ' 23:59:59', '%d.%m.%y %H:%M:%S')
-            
-            f_list = []
-            for e in filtered_expenses:
-                try:
-                    e_date = datetime.strptime(e['date'], '%d.%m.%y')
-                    if start_date <= e_date <= end_date:
-                        f_list.append(e)
-                except: pass
-            filtered_expenses = f_list
-        except: pass
-
-    # Подсчет итогов для отображения (если нужно)
-    return render_template_string(BASE_HTML, content=render_template_string(EXPENSES_HTML, expenses=filtered_expenses, selected_dates=dates_param), current_tab='expenses', show_topbar=False, kassa=get_kassa_totals())
-
-@app.route('/api/save_expense', methods=['POST'])
-def save_expense_api():
-    if 'user' not in session: return jsonify({'error': 'Unauthorized'}), 401
-    data = request.json
-    new_expense = {
-        'id': str(uuid.uuid4())[:8],
-        'date': data.get('date', ''),
-        'desc': data.get('desc', 'Без описания'),
-        'payment': data.get('payment', 'Наличные'),
-        'deduct': data.get('deduct', True),
-        'amount': int(data.get('amount', 0))
-    }
-    EXPENSES_DB.insert(0, new_expense)
-    return jsonify({'status': 'success'})
-
-@app.route('/api/delete_expense', methods=['POST'])
-def delete_expense_api():
-    if 'user' not in session: return jsonify({'error': 'Unauthorized'}), 401
-    exp_id = request.json.get('id')
-    global EXPENSES_DB
-    EXPENSES_DB = [e for e in EXPENSES_DB if str(e.get('id')) != str(exp_id)]
-    return jsonify({'status': 'success'})
-
-
-@app.route('/create_order')
-def create_order():
-    if 'user' not in session: return redirect(url_for('login'))
-    order_id = request.args.get('id')
-    order_obj = next((o for lst in ORDERS_DB.values() for o in lst if str(o.get('id')) == str(order_id)), None)
-    
-    today = datetime.now().date()
-    yesterday = today - timedelta(days=1)
-    in_work_count = len([o for o in ORDERS_DB['in_work'] if datetime.strptime(o['date'], '%d.%m.%y %H:%M').date() in [today, yesterday]])
-    closed_count = len([o for o in ORDERS_DB['closed'] if datetime.strptime(o['date'], '%d.%m.%y %H:%M').date() in [today, yesterday]])
-
-    return render_template_string(BASE_HTML, content=render_template_string(CREATE_ORDER_HTML, order=order_obj, prices_json=json.dumps(PRICES_DB), workers=WORKERS_DB, stock_json=json.dumps(STOCK_DB)), current_tab='checkout', current_status='in_work', in_work_count=in_work_count, closed_count=closed_count, show_topbar=True, kassa=get_kassa_totals())
-
-@app.route('/api/save_order', methods=['POST'])
-def save_order_api():
-    if 'user' not in session: return jsonify({'error': 'Unauthorized'}), 401
-    data = request.json
-    order_id = data.get('id')
-    
-    order_payload = {
-        'date': data.get('date', ''), 'type': data.get('type', ''), 'type_id': data.get('type_id', 'car'),
-        'radius': data.get('radius', 'R16'), 'num': data.get('num', ''), 'mark': data.get('mark', ''),
-        'name': data.get('name', ''), 'phone': data.get('phone', ''), 'model': data.get('model', ''),
-        'master': data.get('master', 'Не назначен'), 'payment_method': data.get('payment_method', 'Наличные'),
-        'amount': data.get('amount', '0').replace(' ₽', '').replace(' ', ''),
-        'discount': data.get('discount', 0), 'services': data.get('services', {}), 'stock': data.get('stock', {}),
-        'per_service_workers': data.get('per_service_workers', {}), 'per_service_discounts': data.get('per_service_discounts', {}),
-        'status': 'in_work'
-    }
-    
-    if order_id:
-        for status_list in [ORDERS_DB['in_work'], ORDERS_DB['closed']]:
-            for o in status_list:
-                if str(o.get('id')) == str(order_id):
-                    order_payload['status'] = o.get('status', 'in_work')
-                    o.update(order_payload)
-                    return jsonify({'status': 'success'})
-
-    order_payload['id'] = str(uuid.uuid4())[:8]
-    ORDERS_DB['in_work'].insert(0, order_payload)
-    return jsonify({'status': 'success'})
-
-@app.route('/api/delete_order', methods=['POST'])
-def delete_order_api():
-    if 'user' not in session: return jsonify({'error': 'Unauthorized'}), 401
-    order_id = request.json.get('id')
-    for key in ['in_work', 'closed']:
-        ORDERS_DB[key] = [o for o in ORDERS_DB[key] if str(o.get('id')) != str(order_id)]
-    return jsonify({'status': 'success'})
-
-# ==========================================
 # ШАБЛОНЫ HTML И CSS
 # ==========================================
 
@@ -495,13 +167,6 @@ BASE_HTML = """
     </div>
     {% else %}
     <div class="topbar" style="justify-content: flex-end;">
-        <div class="dropdown" style="margin-right: auto; margin-left: 20px;">
-            <div class="tab-link" onclick="document.getElementById('kassaMenu').classList.toggle('show'); event.stopPropagation();" style="border: none;">Касса ▾</div>
-            <div class="dropdown-menu" id="kassaMenu">
-                <a href="#">💵 {{ kassa.cash }}</a><a href="#">💳 {{ kassa.card }}</a><a href="#">🧾 {{ kassa.invoice }}</a>
-                <a href="#">Открыть смену</a><a href="#">Х-отчет</a><a href="#">Закрыть смену</a>
-            </div>
-        </div>
         <div class="burger-menu" onclick="toggleSidebar()" style="border-left: none;">☰</div>
     </div>
     {% endif %}
@@ -657,7 +322,14 @@ EXPENSES_HTML = """
     $(function() {
         $('#expDateRange').daterangepicker({
             opens: 'right', locale: { format: 'DD.MM.YY', applyLabel: 'Применить', cancelLabel: 'Отмена', customRangeLabel: 'Другой', daysOfWeek: ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'], monthNames: ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'], firstDay: 1 },
-            ranges: { 'Сегодня': [moment(), moment()], 'Вчера': [moment().subtract(1, 'days'), moment().subtract(1, 'days')], 'Этот месяц': [moment().startOf('month'), moment().endOf('month')] },
+            ranges: { 
+               'Сегодня': [moment(), moment()], 
+               'Вчера': [moment().subtract(1, 'days'), moment().subtract(1, 'days')], 
+               'Последние 7 дней': [moment().subtract(6, 'days'), moment()], 
+               'Последние 30 дней': [moment().subtract(29, 'days'), moment()], 
+               'Этот месяц': [moment().startOf('month'), moment().endOf('month')], 
+               'Прошлый месяц': [moment().subtract(1, 'month').startOf('month'), moment().subtract(1, 'month').endOf('month')] 
+            },
             startDate: moment('2026-03-01'), endDate: moment('2026-03-31')
         });
 
@@ -739,7 +411,34 @@ EXPENSES_HTML = """
     }
 </script>
 """
-
+CHECKOUT_LIST_HTML = """
+<style>
+    .table-wrapper { flex: 1; overflow-y: auto; padding-bottom: 20px; background: #fff;}
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { padding: 12px 20px; text-align: left; border-bottom: 1px solid #eee; }
+    .btn-create-container { padding: 10px; background: white; border-top: 1px solid #eee; }
+    .btn-create { display: block; background: #00b300; color: white; text-align: center; padding: 15px 0; text-decoration: none; font-weight: bold; border-radius: 4px; font-size: 16px;}
+    .clickable-row { transition: background 0.2s; cursor: pointer; }
+    .clickable-row:hover { background-color: #eafbee; }
+</style>
+<div class="table-wrapper">
+    {% if orders %}
+        <table><tbody>
+            {% for o in orders %}
+            <tr class="clickable-row" onclick="window.location.href='/create_order?id={{ o.id }}'">
+                <td style="color:#666; width: 120px;">{{ o.raw_date }}</td>
+                <td>({{ o.type }}) {{ o.num }}</td>
+                <td>{{ o.master }}</td>
+                <td style="font-weight:bold; text-align: right; color: #00b300;">{{ o.amount }} ₽</td>
+            </tr>
+            {% endfor %}
+        </tbody></table>
+    {% else %}
+        <div style="text-align:center; padding: 50px; color: #888;">За последние 2 дня заказов нет</div>
+    {% endif %}
+</div>
+<div class="btn-create-container"><a href="/create_order" class="btn-create">СОЗДАТЬ ЗАКАЗ</a></div>
+"""
 
 CLIENTS_HTML = """
 <style>
@@ -1942,6 +1641,336 @@ CREATE_ORDER_HTML = """
     }
 </script>
 """
+
+# ==========================================
+# РОУТЫ (МАРШРУТИЗАЦИЯ)
+# ==========================================
+
+@app.route('/')
+def index():
+    if 'user' in session: return redirect(url_for('dashboard'))
+    return redirect(url_for('login'))
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        session['user'] = request.form.get('phone', '+7 (932)-322-22-12')
+        return redirect(url_for('dashboard'))
+    return render_template_string(LOGIN_HTML)
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
+
+@app.route('/dashboard')
+def dashboard():
+    if 'user' not in session: return redirect(url_for('login'))
+    return render_template_string(BASE_HTML, content=render_template_string(DASHBOARD_HTML, workers=WORKERS_DB), current_tab='dashboard', show_topbar=False, kassa=get_kassa_totals())
+
+@app.route('/api/get_report', methods=['POST'])
+def get_report_api():
+    if 'user' not in session: return jsonify({'error': 'Unauthorized'}), 401
+    req = request.json
+    start_date_str = req.get('start', '').strip()
+    end_date_str = req.get('end', '').strip()
+    worker_filter = req.get('worker') 
+
+    try:
+        start_date = datetime.strptime(start_date_str, '%d.%m.%y')
+        end_date = datetime.strptime(end_date_str + ' 23:59:59', '%d.%m.%y %H:%M:%S')
+    except Exception as e:
+        start_date = datetime.min
+        end_date = datetime.max
+
+    stats = {
+        'cash': 0, 'cash_count': 0, 'invoice': 0, 'invoice_count': 0,
+        'card': 0, 'card_count': 0, 'transfer': 0, 'transfer_count': 0,
+        'd30': 0, 'd30_count': 0, 'd20': 0, 'd20_count': 0, 'd10': 0, 'd10_count': 0,
+        'total_orders': 0, 'total_orders_count': 0, 'total_disc': 0, 'total_disc_count': 0
+    }
+
+    for o in ORDERS_DB['closed']:
+        try:
+            order_date = datetime.strptime(o['date'], '%d.%m.%y %H:%M')
+            if not (start_date <= order_date <= end_date): continue
+        except: continue 
+            
+        if worker_filter and worker_filter != "(Все)" and worker_filter not in o.get('master', ''): continue
+                
+        amt = int(str(o.get('amount', '0')).replace(' ₽', '').replace(' ', ''))
+        pay_method = o.get('payment_method', 'Наличные')
+        disc = int(o.get('discount', 0))
+
+        stats['total_orders'] += amt
+        stats['total_orders_count'] += 1
+
+        if pay_method == 'Наличные': stats['cash'] += amt; stats['cash_count'] += 1
+        elif pay_method == 'Карта': stats['card'] += amt; stats['card_count'] += 1
+        elif pay_method == 'Счёт': stats['invoice'] += amt; stats['invoice_count'] += 1
+        elif pay_method == 'Перевод': stats['transfer'] += amt; stats['transfer_count'] += 1
+
+        if disc > 0:
+            disc_rubles = int((amt / (1 - disc/100)) * (disc/100))
+            stats['total_disc'] += disc_rubles
+            stats['total_disc_count'] += 1
+            if disc == 10: stats['d10'] += disc_rubles; stats['d10_count'] += 1
+            elif disc == 20: stats['d20'] += disc_rubles; stats['d20_count'] += 1
+            elif disc == 30: stats['d30'] += disc_rubles; stats['d30_count'] += 1
+
+    avg = stats['total_orders'] / stats['total_orders_count'] if stats['total_orders_count'] > 0 else 0
+        
+    return jsonify({
+        'cash': f"{stats['cash']:,} ₽".replace(',', ' '), 'cash_count': stats['cash_count'],
+        'invoice': f"{stats['invoice']:,} ₽".replace(',', ' '), 'invoice_count': stats['invoice_count'],
+        'card': f"{stats['card']:,} ₽".replace(',', ' '), 'card_count': stats['card_count'],
+        'transfer': f"{stats['transfer']:,} ₽".replace(',', ' '), 'transfer_count': stats['transfer_count'],
+        'total_orders': f"{stats['total_orders']:,} ₽".replace(',', ' '), 'total_orders_count': stats['total_orders_count'],
+        'salary': '0 ₽', 'other_exp': '0 ₽', 'total_exp': '0 ₽', 
+        'avg_check': f"{avg:,.2f} ₽".replace(',', ' '), 'obj_load': '0,00 %', 'worker_load': '0,00 %',
+        'd30': f"{stats['d30']:,} ₽".replace(',', ' '), 'd30_count': stats['d30_count'],
+        'd20': f"{stats['d20']:,} ₽".replace(',', ' '), 'd20_count': stats['d20_count'],
+        'd10': f"{stats['d10']:,} ₽".replace(',', ' '), 'd10_count': stats['d10_count'],
+        'total_disc': f"{stats['total_disc']:,} ₽".replace(',', ' '), 'total_disc_count': stats['total_disc_count']
+    })
+
+def format_orders_for_table(orders_list):
+    result = []
+    for idx, o in enumerate(orders_list):
+        base_grp = 'truck' if o.get('type_id') == 'truck' else 'car'
+        
+        srv_list = []
+        for s_id, qty in o.get('services', {}).items():
+            name = SRV_NAMES[base_grp].get(s_id, s_id)
+            if base_grp == 'car' and o.get('radius'): name += f" {o['radius']}"
+            if qty > 1: name += f" x {qty}"
+            srv_list.append(f"▶ {name}")
+
+        stk_list = []
+        for s_id, qty in o.get('stock', {}).items():
+            name = STOCK_MAP.get(s_id, s_id)
+            stk_list.append(name)
+
+        date_parts = o.get('date', '').split(' ')
+        date_html = f"{date_parts[0]}<br><span style='color:#888; font-size:12px;'>{date_parts[1] if len(date_parts)>1 else ''}</span>"
+        status_html = '<span class="status-closed">Закрыт</span>' if o.get('status') == 'closed' else '<span class="status-work">В работе</span>'
+
+        result.append({
+            'index': o.get('id') if len(str(o.get('id'))) < 5 else idx + 1,
+            'id': o.get('id'),
+            'date_html': date_html,
+            'raw_date': o.get('date', ''),
+            'mark': o.get('mark', ''),
+            'num': o.get('num', 'БН') or 'БН',
+            'services_html': '<br>'.join(srv_list) or '—',
+            'stock_html': '<br>'.join(stk_list),
+            'master': o.get('master', ''),
+            'payment': o.get('payment_method', ''),
+            'discount': f"{o.get('discount')}%" if o.get('discount', 0) else '',
+            'amount': o.get('amount', '0'),
+            'status_html': status_html,
+            'raw_status': o.get('status', 'in_work')
+        })
+    return result
+
+@app.route('/orders_list')
+def orders_list():
+    if 'user' not in session: return redirect(url_for('login'))
+    
+    dates_param = request.args.get('dates')
+    all_raw_data = ORDERS_DB['in_work'] + ORDERS_DB['closed']
+    
+    if dates_param:
+        try:
+            start_str, end_str = dates_param.split(' - ')
+            start_date = datetime.strptime(start_str.strip(), '%d.%m.%y')
+            end_date = datetime.strptime(end_str.strip() + ' 23:59:59', '%d.%m.%y %H:%M:%S')
+            
+            filtered_data = []
+            for o in all_raw_data:
+                try:
+                    o_date = datetime.strptime(o['date'], '%d.%m.%y %H:%M')
+                    if start_date <= o_date <= end_date:
+                        filtered_data.append(o)
+                except: pass
+            all_raw_data = filtered_data
+        except: pass
+            
+    formatted_data = format_orders_for_table(all_raw_data)
+    return render_template_string(BASE_HTML, content=render_template_string(ORDERS_FULL_TABLE_HTML, orders=formatted_data, workers=WORKERS_DB, selected_dates=dates_param), current_tab='orders_list', show_topbar=False, kassa=get_kassa_totals())
+
+@app.route('/checkout')
+def checkout():
+    if 'user' not in session: return redirect(url_for('login'))
+    status = request.args.get('status', 'in_work')
+    
+    today = datetime.now().date()
+    yesterday = today - timedelta(days=1)
+    
+    recent_orders = []
+    for o in ORDERS_DB.get(status, []):
+        try:
+            o_date = datetime.strptime(o['date'], '%d.%m.%y %H:%M').date()
+            if o_date in [today, yesterday]: recent_orders.append(o)
+        except: pass
+
+    formatted_data = format_orders_for_table(recent_orders)
+    
+    in_work_count = len([o for o in ORDERS_DB['in_work'] if datetime.strptime(o['date'], '%d.%m.%y %H:%M').date() in [today, yesterday]])
+    closed_count = len([o for o in ORDERS_DB['closed'] if datetime.strptime(o['date'], '%d.%m.%y %H:%M').date() in [today, yesterday]])
+
+    return render_template_string(BASE_HTML, content=render_template_string(CHECKOUT_LIST_HTML, orders=formatted_data, status=status), current_tab='checkout', current_status=status, in_work_count=in_work_count, closed_count=closed_count, show_topbar=True, kassa=get_kassa_totals())
+
+@app.route('/clients')
+def clients():
+    if 'user' not in session: return redirect(url_for('login'))
+    
+    clients_dict = {}
+    for status in ['closed', 'in_work']:
+        for o in ORDERS_DB[status]:
+            phone = o.get('phone', '').strip()
+            if not phone: phone = 'Без телефона'
+            
+            if phone not in clients_dict:
+                clients_dict[phone] = {
+                    'phone': phone,
+                    'name': o.get('name', ''),
+                    'mark': o.get('mark', ''),
+                    'num': o.get('num', ''),
+                    'total_amount': 0,
+                    'orders': []
+                }
+            
+            if not clients_dict[phone]['name'] and o.get('name'): clients_dict[phone]['name'] = o['name']
+            if not clients_dict[phone]['mark'] and o.get('mark'): clients_dict[phone]['mark'] = o['mark']
+            if not clients_dict[phone]['num'] and o.get('num') and o.get('num') != 'БН': clients_dict[phone]['num'] = o['num']
+
+            amt = int(str(o.get('amount', '0')).replace(' ₽', '').replace(' ', ''))
+            clients_dict[phone]['total_amount'] += amt
+            
+            base_grp = 'truck' if o.get('type_id') == 'truck' else 'car'
+            srv_list = []
+            for s_id, qty in o.get('services', {}).items():
+                name = SRV_NAMES[base_grp].get(s_id, s_id)
+                if base_grp == 'car' and o.get('radius'): name += f" {o['radius']}"
+                if qty > 1: name += f" x {qty}"
+                srv_list.append(name)
+                
+            clients_dict[phone]['orders'].append({
+                'date': o.get('date', ''),
+                'services': '<br>'.join(srv_list) or '—',
+                'master': o.get('master', ''),
+                'payment': o.get('payment_method', ''),
+                'amount': f"{amt:,} ₽".replace(',', ' ')
+            })
+            
+    client_list = list(clients_dict.values())
+    client_list.sort(key=lambda x: x['total_amount'], reverse=True)
+    
+    return render_template_string(BASE_HTML, content=render_template_string(CLIENTS_HTML, clients=client_list), current_tab='clients', show_topbar=False, kassa=get_kassa_totals())
+
+# НОВАЯ ВКЛАДКА РАСХОДЫ
+@app.route('/expenses')
+def expenses():
+    if 'user' not in session: return redirect(url_for('login'))
+    
+    dates_param = request.args.get('dates')
+    filtered_expenses = EXPENSES_DB.copy()
+    
+    if dates_param:
+        try:
+            start_str, end_str = dates_param.split(' - ')
+            start_date = datetime.strptime(start_str.strip(), '%d.%m.%y')
+            end_date = datetime.strptime(end_str.strip() + ' 23:59:59', '%d.%m.%y %H:%M:%S')
+            
+            f_list = []
+            for e in filtered_expenses:
+                try:
+                    e_date = datetime.strptime(e['date'], '%d.%m.%y')
+                    if start_date <= e_date <= end_date:
+                        f_list.append(e)
+                except: pass
+            filtered_expenses = f_list
+        except: pass
+
+    # Подсчет итогов для отображения (если нужно)
+    return render_template_string(BASE_HTML, content=render_template_string(EXPENSES_HTML, expenses=filtered_expenses, selected_dates=dates_param), current_tab='expenses', show_topbar=False, kassa=get_kassa_totals())
+
+@app.route('/api/save_expense', methods=['POST'])
+def save_expense_api():
+    if 'user' not in session: return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json
+    new_expense = {
+        'id': str(uuid.uuid4())[:8],
+        'date': data.get('date', ''),
+        'desc': data.get('desc', 'Без описания'),
+        'payment': data.get('payment', 'Наличные'),
+        'deduct': data.get('deduct', True),
+        'amount': int(data.get('amount', 0))
+    }
+    EXPENSES_DB.insert(0, new_expense)
+    return jsonify({'status': 'success'})
+
+@app.route('/api/delete_expense', methods=['POST'])
+def delete_expense_api():
+    if 'user' not in session: return jsonify({'error': 'Unauthorized'}), 401
+    exp_id = request.json.get('id')
+    global EXPENSES_DB
+    EXPENSES_DB = [e for e in EXPENSES_DB if str(e.get('id')) != str(exp_id)]
+    return jsonify({'status': 'success'})
+
+
+@app.route('/create_order')
+def create_order():
+    if 'user' not in session: return redirect(url_for('login'))
+    order_id = request.args.get('id')
+    order_obj = next((o for lst in ORDERS_DB.values() for o in lst if str(o.get('id')) == str(order_id)), None)
+    
+    today = datetime.now().date()
+    yesterday = today - timedelta(days=1)
+    in_work_count = len([o for o in ORDERS_DB['in_work'] if datetime.strptime(o['date'], '%d.%m.%y %H:%M').date() in [today, yesterday]])
+    closed_count = len([o for o in ORDERS_DB['closed'] if datetime.strptime(o['date'], '%d.%m.%y %H:%M').date() in [today, yesterday]])
+
+    return render_template_string(BASE_HTML, content=render_template_string(CREATE_ORDER_HTML, order=order_obj, prices_json=json.dumps(PRICES_DB), workers=WORKERS_DB, stock_json=json.dumps(STOCK_DB)), current_tab='checkout', current_status='in_work', in_work_count=in_work_count, closed_count=closed_count, show_topbar=True, kassa=get_kassa_totals())
+
+@app.route('/api/save_order', methods=['POST'])
+def save_order_api():
+    if 'user' not in session: return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json
+    order_id = data.get('id')
+    
+    order_payload = {
+        'date': data.get('date', ''), 'type': data.get('type', ''), 'type_id': data.get('type_id', 'car'),
+        'radius': data.get('radius', 'R16'), 'num': data.get('num', ''), 'mark': data.get('mark', ''),
+        'name': data.get('name', ''), 'phone': data.get('phone', ''), 'model': data.get('model', ''),
+        'master': data.get('master', 'Не назначен'), 'payment_method': data.get('payment_method', 'Наличные'),
+        'amount': data.get('amount', '0').replace(' ₽', '').replace(' ', ''),
+        'discount': data.get('discount', 0), 'services': data.get('services', {}), 'stock': data.get('stock', {}),
+        'per_service_workers': data.get('per_service_workers', {}), 'per_service_discounts': data.get('per_service_discounts', {}),
+        'status': 'in_work'
+    }
+    
+    if order_id:
+        for status_list in [ORDERS_DB['in_work'], ORDERS_DB['closed']]:
+            for o in status_list:
+                if str(o.get('id')) == str(order_id):
+                    order_payload['status'] = o.get('status', 'in_work')
+                    o.update(order_payload)
+                    return jsonify({'status': 'success'})
+
+    order_payload['id'] = str(uuid.uuid4())[:8]
+    ORDERS_DB['in_work'].insert(0, order_payload)
+    return jsonify({'status': 'success'})
+
+@app.route('/api/delete_order', methods=['POST'])
+def delete_order_api():
+    if 'user' not in session: return jsonify({'error': 'Unauthorized'}), 401
+    order_id = request.json.get('id')
+    for key in ['in_work', 'closed']:
+        ORDERS_DB[key] = [o for o in ORDERS_DB[key] if str(o.get('id')) != str(order_id)]
+    return jsonify({'status': 'success'})
+
+
 
 if __name__ == '__main__':
     print("Сервер запущен! Откройте в браузере http://127.0.0.1:8080")
