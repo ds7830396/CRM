@@ -3,7 +3,19 @@ import uuid
 import json
 from datetime import datetime, timedelta
 from flask import Flask, session, request, render_template_string, redirect, url_for, jsonify
+# В начале файла CRM.py
+DATE_FORMAT_STR = "%d.%m.%y"
+DATETIME_FORMAT_STR = "%d.%m.%y %H:%M"
 
+# Пример использования при фильтрации
+# Вместо '01.01.26 - 10.01.26'
+def parse_date_range(date_str):
+    if not date_str:
+        return None, None
+    start_s, end_s = date_str.split(' - ')
+    start_d = datetime.strptime(start_s, DATE_FORMAT_STR)
+    end_d = datetime.strptime(end_s, DATE_FORMAT_STR)
+    return start_d, end_d
 app = Flask(__name__)
 app.secret_key = 'super_secret_key_control365'
 
@@ -127,25 +139,25 @@ BASE_HTML = """
 <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.css" />
 
 <style>
-/* Добавить в BASE_HTML, удалить из остальных */
-.date-input-wrapper { position: relative; display: inline-block; }
-.date-input-wrapper input { 
-    padding: 8px 30px 8px 12px; 
-    border: 1px solid #ccc; 
-    border-radius: 4px; 
-    outline: none; 
-    background: #fff; 
-    width: 170px; 
-    cursor: pointer; 
+.date-input-wrapper {
+    position: relative;
+    display: inline-block;
+    width: 100%;
 }
-.date-input-wrapper::after { 
-    content: '📅'; 
-    position: absolute; 
-    right: 10px; 
-    top: 50%; 
-    transform: translateY(-50%); 
-    pointer-events: none; 
-    font-size: 14px; 
+.date-input-wrapper i {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #666;
+    pointer-events: none;
+}
+/* Стили для самого daterangepicker (унификация выпадающего окна) */
+.daterangepicker {
+    font-family: inherit !important;
+}
+.daterangepicker td.active, .daterangepicker td.active:hover {
+    background-color: #007bff !important;
 }
     body { margin: 0; font-family: Arial, sans-serif; background: #f4f5f8; display: flex; flex-direction: column; height: 100vh; overflow: hidden; color: #333; }
     .topbar { display: flex; border-bottom: 1px solid #ddd; background: #fff; height: 50px; flex-shrink: 0; z-index: 50; }
@@ -207,46 +219,75 @@ BASE_HTML = """
     
     <script>
 
-    function initControlCalendar(selector, isSingle = false, withTime = false) {
-        let options = {
-            locale: {
-                format: withTime ? 'DD.MM.YY HH:mm' : 'DD.MM.YY',
-                applyLabel: 'Применить',
-                cancelLabel: 'Отмена',
-                customRangeLabel: 'Другой',
-                daysOfWeek: ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'],
-                monthNames: ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'],
-                firstDay: 1
-            }
-        };
+    function initControlCalendar(selector, options = {}) {
+    const {
+        isSingle = false, 
+        withTime = false, 
+        initialValue = '', 
+        onApply = null 
+    } = options;
 
-        if (isSingle) {
-            // Настройки для выбора одной даты (с выбором времени или без)
-            options.singleDatePicker = true;
-            options.showDropdowns = true;
-            if (withTime) {
-                options.timePicker = true;
-                options.timePicker24Hour = true;
-            }
-        } else {
-            // Настройки для выбора диапазона (как в панели управления)
-            options.opens = 'right';
-            options.ranges = {
-               'Сегодня': [moment(), moment()],
-               'Вчера': [moment().subtract(1, 'days'), moment().subtract(1, 'days')],
-               'Последние 7 дней': [moment().subtract(6, 'days'), moment()],
-               'Последние 30 дней': [moment().subtract(29, 'days'), moment()],
-               'Этот месяц': [moment().startOf('month'), moment().endOf('month')],
-               'Прошлый месяц': [moment().subtract(1, 'month').startOf('month'), moment().subtract(1, 'month').endOf('month')]
-            };
-            // Ставим по умолчанию текущий месяц вместо жесткого марта 2026
-            options.startDate = moment().startOf('month');
-            options.endDate = moment().endOf('month');
+    const format = withTime ? 'DD.MM.YY HH:mm' : 'DD.MM.YY';
+    
+    let config = {
+        autoUpdateInput: false, // Важно: не заполнять инпут автоматом, если он пустой
+        locale: {
+            format: format,
+            applyLabel: 'Ок',
+            cancelLabel: 'Сброс',
+            customRangeLabel: 'Свой интервал',
+            daysOfWeek: ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'],
+            monthNames: ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'],
+            firstDay: 1
         }
+    };
 
-        $(selector).daterangepicker(options);
-        return $(selector).data('daterangepicker');
+    if (isSingle) {
+        config.singleDatePicker = true;
+        config.showDropdowns = true;
+        if (withTime) {
+            config.timePicker = true;
+            config.timePicker24Hour = true;
+        }
+    } else {
+        config.ranges = {
+           'Сегодня': [moment(), moment()],
+           'Вчера': [moment().subtract(1, 'days'), moment().subtract(1, 'days')],
+           'Этот месяц': [moment().startOf('month'), moment().endOf('month')],
+           'Прошлый месяц': [moment().subtract(1, 'month').startOf('month'), moment().subtract(1, 'month').endOf('month')]
+        };
     }
+
+    const $el = $(selector);
+    $el.daterangepicker(config);
+
+    // Установка начального значения
+    if (initialValue) {
+        if (!isSingle && initialValue.includes('-')) {
+            const dates = initialValue.split(' - ');
+            $el.data('daterangepicker').setStartDate(dates[0]);
+            $el.data('daterangepicker').setEndDate(dates[1]);
+            $el.val(initialValue);
+        } else {
+            $el.data('daterangepicker').setStartDate(initialValue);
+            $el.val(initialValue);
+        }
+    }
+
+    // Обработка клика по кнопке "Применить"
+    $el.on('apply.daterangepicker', function(ev, picker) {
+        let val = isSingle 
+            ? picker.startDate.format(format) 
+            : picker.startDate.format(format) + ' - ' + picker.endDate.format(format);
+        $(this).val(val);
+        if (typeof onApply === 'function') onApply(val);
+    });
+
+    // Обработка "Отмены/Сброса"
+    $el.on('cancel.daterangepicker', function() {
+        $(this).val('');
+    });
+}
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
             document.getElementById('overlay').classList.toggle('show');
@@ -379,24 +420,24 @@ EXPENSES_HTML = """
     let currentExpPay = 'Наличные';
 
     $(function() {
-        // Инициализация календарей через общую функцию
-        initControlCalendar('#expDateRange');
-        initControlCalendar('#newExpDate', true); // isSingle = true
-
-        {% if selected_dates %}
-            $('#expDateRange').val("{{ selected_dates }}");
-            let dates = "{{ selected_dates }}".split('-');
-            if (dates.length === 2) {
-                $('#expDateRange').data('daterangepicker').setStartDate(dates[0].trim());
-                $('#expDateRange').data('daterangepicker').setEndDate(dates[1].trim());
+        // 1. Инициализация фильтра (Диапазон)
+        // Теперь не нужно писать {% if selected_dates %}, просто передаем значение в параметр
+        initControlCalendar('#expDateRange', {
+            initialValue: "{{ selected_dates }}",
+            onApply: function(val) {
+                // Вместо отдельной функции filterExpenses, делаем редирект сразу при выборе
+                window.location.href = '/expenses?dates=' + encodeURIComponent(val);
             }
-        {% endif %}
+        });
+
+        // 2. Инициализация даты для нового расхода (Одиночная)
+        initControlCalendar('#newExpDate', {
+            isSingle: true,
+            initialValue: moment().format('DD.MM.YY') // Ставим сегодня по умолчанию
+        });
     });
 
-    function filterExpenses() {
-        const dateStr = document.getElementById('expDateRange').value;
-        window.location.href = '/expenses?dates=' + encodeURIComponent(dateStr);
-    }
+    // Функция filterExpenses больше не нужна, так как логика перешла в onApply
 
     function openExpModal() {
         document.getElementById('newExpDesc').value = '';
@@ -439,7 +480,9 @@ EXPENSES_HTML = """
         };
 
         fetch('/api/save_expense', {
-            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+            method: 'POST', 
+            headers: {'Content-Type': 'application/json'}, 
+            body: JSON.stringify(payload)
         }).then(res => res.json()).then(data => {
             if(data.status === 'success') window.location.reload();
         });
@@ -448,13 +491,16 @@ EXPENSES_HTML = """
     function deleteExpense(id) {
         if(confirm('Удалить этот расход? (Сумма вернется в кассу)')) {
             fetch('/api/delete_expense', {
-                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id: id})
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'}, 
+                body: JSON.stringify({id: id})
             }).then(res => res.json()).then(data => {
                 if(data.status === 'success') window.location.reload();
             });
         }
     }
 </script>
+
 """
 CHECKOUT_LIST_HTML = """
 <style>
@@ -854,17 +900,12 @@ ORDERS_FULL_TABLE_HTML = """
 <script>
     $(function() {
         // Инициализация календаря
-        initControlCalendar('#ordersDateRange');
-
-        {% if selected_dates %}
-            $('#ordersDateRange').val("{{ selected_dates }}");
-            let dates = "{{ selected_dates }}".split('-');
-            if (dates.length === 2) {
-                $('#ordersDateRange').data('daterangepicker').setStartDate(dates[0].trim());
-                $('#ordersDateRange').data('daterangepicker').setEndDate(dates[1].trim());
-            }
-        {% endif %}
+       $(document).ready(function() {
+    initControlCalendar('#orderDateRange', {
+        initialValue: "{{ selected_dates }}",
+        onApply: function() { $('#filterForm').submit(); }
     });
+});
 
     function applyDateFilter() {
         const dateStr = document.getElementById('ordersDateRange').value;
@@ -1226,7 +1267,11 @@ CREATE_ORDER_HTML = """
         calcTotal();
 
         // Инициализация календаря для окна создания заказа (включая выбор времени)
-        initControlCalendar('#dateTimeInput', true, true);
+        initControlCalendar('#dateTimeInput', {
+            isSingle: true,
+            withTime: true,
+            initialValue: document.getElementById('dateTimeInput').value
+        });
     });
 
     function renderServices() {
