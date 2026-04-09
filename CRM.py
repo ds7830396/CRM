@@ -127,6 +127,26 @@ BASE_HTML = """
 <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.css" />
 
 <style>
+/* Добавить в BASE_HTML, удалить из остальных */
+.date-input-wrapper { position: relative; display: inline-block; }
+.date-input-wrapper input { 
+    padding: 8px 30px 8px 12px; 
+    border: 1px solid #ccc; 
+    border-radius: 4px; 
+    outline: none; 
+    background: #fff; 
+    width: 170px; 
+    cursor: pointer; 
+}
+.date-input-wrapper::after { 
+    content: '📅'; 
+    position: absolute; 
+    right: 10px; 
+    top: 50%; 
+    transform: translateY(-50%); 
+    pointer-events: none; 
+    font-size: 14px; 
+}
     body { margin: 0; font-family: Arial, sans-serif; background: #f4f5f8; display: flex; flex-direction: column; height: 100vh; overflow: hidden; color: #333; }
     .topbar { display: flex; border-bottom: 1px solid #ddd; background: #fff; height: 50px; flex-shrink: 0; z-index: 50; }
     .tab-link { display: flex; align-items: center; padding: 0 20px; text-decoration: none; color: #555; border-right: 1px solid #eee; cursor: pointer; font-size: 14px; }
@@ -245,9 +265,7 @@ EXPENSES_HTML = """
     .exp-container { flex: 1; padding: 20px; background: #fff; display: flex; flex-direction: column; overflow: hidden; }
     .exp-header { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; }
     
-    .date-input-wrapper { position: relative; display: inline-block; }
-    .date-input-wrapper input { padding: 9px 30px 9px 12px; border: 1px solid #ccc; border-radius: 4px; outline: none; background: #fff; width: 170px; cursor: pointer; }
-    .date-input-wrapper::after { content: '📅'; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; font-size: 14px; }
+    
     
     .btn-primary { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; transition: 0.2s;}
     .btn-primary:hover { background: #0056b3; }
@@ -587,9 +605,7 @@ DASHBOARD_HTML = """
     .dash-container { padding: 20px; overflow-y: auto; height: 100%; box-sizing: border-box; }
     .dash-header { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; }
     .dash-header select { padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; outline: none; background: #fff; min-width: 150px; }
-    .date-input-wrapper { position: relative; display: inline-block; }
-    .date-input-wrapper input { padding: 8px 30px 8px 12px; border: 1px solid #ccc; border-radius: 4px; outline: none; background: #fff; width: 170px; cursor: pointer; }
-    .date-input-wrapper::after { content: '📅'; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; font-size: 14px; }
+    
     .btn-primary { background: #007bff; color: white; border: none; padding: 9px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; transition: 0.2s; font-size: 14px; }
     .btn-primary:hover { background: #0056b3; }
     .btn-primary:disabled { background: #99c2ff; cursor: not-allowed; }
@@ -713,9 +729,7 @@ ORDERS_FULL_TABLE_HTML = """
     .table-container { flex: 1; padding: 20px; background: #fff; display: flex; flex-direction: column; overflow: hidden; }
     .table-header-filters { display: flex; gap: 10px; margin-bottom: 15px; align-items: center; }
     .table-header-filters select { padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; outline: none; background: #fff; }
-    .date-input-wrapper { position: relative; display: inline-block; }
-    .date-input-wrapper input { padding: 8px 30px 8px 12px; border: 1px solid #ccc; border-radius: 4px; outline: none; background: #fff; width: 170px; cursor: pointer; }
-    .date-input-wrapper::after { content: '📅'; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; font-size: 14px; }
+    
     .btn-primary { background: #007bff; color: white; border: none; padding: 9px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; transition: 0.2s; font-size: 14px;}
     .btn-primary:hover { background: #0056b3; }
     
